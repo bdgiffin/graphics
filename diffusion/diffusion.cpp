@@ -10,6 +10,10 @@
 #include<cmath>     // abs
 #include<unistd.h>  // usleep
 
+// include CImg for reading image files
+#include "CImg.h"
+using namespace cimg_library;
+
 // forward declarations
 void motion(int x, int y);
 
@@ -37,21 +41,28 @@ public :
     color[2] = b;
   }
 
-  void render(int time) {
-    float c[3];
-    c[0] = color[0] * (0.75 + 0.25*std::sin(0.1*time));
-    c[1] = color[1] * (0.75 + 0.25*std::sin(0.1*time));
-    c[2] = color[2] * (0.75 + 0.25*std::sin(0.1*time));
-    glColor3f(c[0], c[1], c[2]); // color vertex 1
+  float value(void) {
+    return color[0];
+  }
+
+  void addValue(float c) {
+    color[0] += c;
+    color[1] += c;
+    color[2] += c;
+  }
+
+  void render(void) {
+    // vertices are draw in normalized device coordinates (NDC)
+    glColor3f(color[0], color[1], color[2]); // color vertex 1
     glVertex2f(coordinate[0]-0.5*dimension[0],coordinate[1]-0.5*dimension[1]);
 
-    glColor3f(c[0], c[1], c[2]); // color vertex 2
+    glColor3f(color[0], color[1], color[2]); // color vertex 2
     glVertex2f(coordinate[0]+0.5*dimension[0],coordinate[1]-0.5*dimension[1]);
 
-    glColor3f(c[0], c[1], c[2]); // color vertex 3
+    glColor3f(color[0], color[1], color[2]); // color vertex 3
     glVertex2f(coordinate[0]+0.5*dimension[0],coordinate[1]+0.5*dimension[1]);
 
-    glColor3f(c[0], c[1], c[2]); // color vertex 4
+    glColor3f(color[0], color[1], color[2]); // color vertex 4
     glVertex2f(coordinate[0]-0.5*dimension[0],coordinate[1]+0.5*dimension[1]);
   }
 };
@@ -60,16 +71,17 @@ class Grid {
 private :
   int Nx, Ny, Px, Py;
   Pixel* pixels;
-  int time;
+  float time;
 
 public :
 
-  void initialize(unsigned nx, unsigned ny, unsigned px, unsigned py) {
-    time = 0;
-    Nx = nx;
-    Ny = ny;
-    Px = px;
-    Py = py;
+  void initialize(CImg<float>& image) {
+    time = 0.0;
+    std::cout << image.spectrum() << std::endl;
+    Nx = image.width();
+    Ny = image.height();
+    Px = 12*Nx;
+    Py = 12*Ny;
     float w = 2.0 / Nx;
     float h = 2.0 / Ny;
     pixels = new Pixel[Nx*Ny];
@@ -79,10 +91,79 @@ public :
 	float x = w * (i + 0.5) - 1.0;
 	pixels[i+Nx*j].setCoordinate(x, y);
 	pixels[i+Nx*j].setDimension(w, h);
-	pixels[i+Nx*j].setColor(std::abs(x),std::abs(y),0.5);
+	pixels[i+Nx*j].setColor(image(i,j,0)/256.0,
+                                image(i,j,0)/256.0,
+                                image(i,j,0)/256.0);
       }
     }
   } // initialize
+
+  float getTime(void) {
+    return time;
+  }
+
+  void setTime(float t) {
+    time = t;
+  }
+
+  void update(float dt) {
+    // compute updating coefficients
+    float w = 2.0 / Nx;
+    float h = 2.0 / Ny;
+    float k = 0.0003; // diffusivity
+    float fx = k * dt / (w*w);
+    float fy = k * dt / (h*h);
+
+    // compute change in concentration values (du)
+    float du[Nx][Ny];
+    for (int j = 0; j < Ny; j++) {
+      for (int i = 0; i < Nx; i++) {
+	du[i][j] = -2.0 * (fx + fy) * pixels[i+Nx*j].value();
+      }
+    }
+
+    for (int j = 0; j < Ny; j++) {
+      for (int i = 1; i < Nx; i++) {
+	du[i][j] += fx * pixels[i-1+Nx*j].value();
+      }
+    }
+
+    for (int j = 0; j < Ny; j++) {
+      for (int i = 0; i < (Nx-1); i++) {
+	du[i][j] += fx * pixels[i+1+Nx*j].value();
+      }
+    }
+
+    for (int j = 1; j < Ny; j++) {
+      for (int i = 0; i < Nx; i++) {
+	du[i][j] += fy * pixels[i+Nx*(j-1)].value();
+      }
+    }
+
+    for (int j = 0; j < (Ny-1); j++) {
+      for (int i = 0; i < Nx; i++) {
+	du[i][j] += fy * pixels[i+Nx*(j+1)].value();
+      }
+    }
+
+    // update concentrations
+    for (int j = 0; j < Ny; j++) {
+      for (int i = 0; i < Nx; i++) {
+	pixels[i+Nx*j].addValue(du[i][j]);
+      }
+    }
+
+    // update time
+    time += dt;
+  }
+
+  int width(void) {
+    return Px;
+  }
+
+  int height(void) {
+    return Py;
+  }
 
   void setWidth(int p) {
     Px = p;
@@ -104,7 +185,7 @@ public :
       float h = 2.0 / Ny;
       int i = std::min(std::max(int(floor(((2.0 / Px) * x) / w)),0),Nx-1);
       int j = std::min(std::max(int(floor((2.0 - (2.0 / Py) * y) / h)),0),Ny-1);
-      pixels[i+Nx*j].setColor(1.0,0.0,0.0);
+      pixels[i+Nx*j].setColor(1.0,1.0,1.0);
       glutMotionFunc(motion);
       glutPostRedisplay(); // refresh the display
     }
@@ -115,42 +196,25 @@ public :
     float h = 2.0 / Ny;
     int i = std::min(std::max(int(floor(((2.0 / Px) * x) / w)),0),Nx-1);
     int j = std::min(std::max(int(floor((2.0 - (2.0 / Py) * y) / h)),0),Ny-1);
-    pixels[i+Nx*j].setColor(1.0,0.0,0.0);
+    pixels[i+Nx*j].setColor(1.0,1.0,1.0);
     glutPostRedisplay(); // refresh the display
   }
 
-  void render() {
+  void render(void) {
     // clear the current bit buffers, restoring them to their preset values
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-    // Reset transformations
-    glLoadIdentity();
-    // Set the camera
-    // https://www.khronos.org/registry/OpenGL-Refpages/gl2.1/xhtml/gluLookAt.xml
-    gluLookAt(	0.0f, 0.0f, -1.0f,   // eye position (x,y,z)
-		0.0f, 0.0f,  0.0f,   // center position (x,y,z)
-		0.0f, 1.0f,  0.0f);  // up direction (x,y,z)
-    // rotate everything by the specified angle, about the specified axis
-    // -1st arg: angle of total rotation
-    // -2nd arg: x-component of rotation axis
-    // -3rd arg: y-component of rotation axis
-    // -4th arg: z-component of rotation axis
-    glRotatef(1.0*time, 0.0, 0.0, 1.0);
 
     // draw quadrilaterals
     glBegin(GL_QUADS);
     for (int j = 0; j < Ny; j++) {
       for (int i = 0; i < Nx; i++) {
-	pixels[i+Nx*j].render(time);
+	pixels[i+Nx*j].render();
       }
     }
     glEnd(); // GL_QUADS
 
     // for double buffering: display buffer that was just rendered
     glutSwapBuffers();
-
-    // update the time variable
-    time+=1;
 
   } // render
 };
@@ -170,11 +234,15 @@ void motion(int x, int y) {
   g.m_motion(x, y);
 }
 
-void render() {
+void render(void) {
   g.render();
 }
 
-void idle() {
+void idle(void) {
+  float t = glutGet(GLUT_ELAPSED_TIME);
+  float dt = (t - g.getTime()) / 1000;
+  g.setTime(t);
+  g.update(dt);
   glutMouseFunc(mouse);
   glutPostRedisplay(); // refresh the display
 }
@@ -213,7 +281,8 @@ void reshape(int w, int h) {
 }
 
 int main(int argc, char** argv) {
-  g.initialize(60, 60, 600, 600); // initialize the grid
+  CImg<float> image("elevation.png");
+  g.initialize(image); // initialize the grid
 
   // initialize glut
   glutInit(&argc, argv);
@@ -223,7 +292,7 @@ int main(int argc, char** argv) {
   glutInitWindowPosition(100, 100);
 
   // specify the initial size of the display window (in pixels)
-  glutInitWindowSize(600, 600);
+  glutInitWindowSize(g.width(), g.height());
 
   // initialize the display modes:
   // -define colors via RGBA values

@@ -11,7 +11,7 @@ all : $(OBJS) $(EXES)
 .PHONY : clean
 
 % : %.o
-	$(CC) $(CF) -o $@ $< $(INCLUDES) -lGL -lGLU -lglut
+	$(CC) $(CF) -o $@ $< $(INCLUDES) -pthread -lX11 -lGL -lGLU -lglut
 
 %.o : %.cpp
 	$(CC) $(CF) -c $<

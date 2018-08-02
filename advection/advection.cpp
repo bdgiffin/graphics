@@ -52,6 +52,7 @@ public :
   }
 
   void render(void) {
+    // vertices are draw in normalized device coordinates (NDC)
     glColor3f(color[0], color[1], color[2]); // color vertex 1
     glVertex2f(coordinate[0]-0.5*dimension[0],coordinate[1]-0.5*dimension[1]);
 
@@ -164,6 +165,14 @@ public :
     return Py;
   }
 
+  void setWidth(int p) {
+    Px = p;
+  }
+
+  void setHeight(int p) {
+    Py = p;
+  }
+
   void keyboard(unsigned char c, int x, int y) {
     if (c == 27) { // ASCII code for the escape key
       exit(0);
@@ -243,6 +252,10 @@ void reshape(int w, int h) {
   // (you cant make a window of zero width).
   if (h == 0) {h = 1;}
   float ratio = (1.0 * w) / h;
+
+  // change pixel dimension of the window
+  g.setWidth(glutGet(GLUT_WINDOW_WIDTH));
+  g.setHeight(glutGet(GLUT_WINDOW_HEIGHT));
 
   // Use the Projection Matrix
   glMatrixMode(GL_PROJECTION);
