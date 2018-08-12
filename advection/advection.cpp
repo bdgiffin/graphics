@@ -5,6 +5,9 @@
 #include <GL/glut.h>
 #endif
 
+// include project headers
+#include "mesh.h"   // Mesh
+
 // include standard C/C++ libraries
 #include<iostream>  // exit
 #include<cmath>     // abs
