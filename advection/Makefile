@@ -1,5 +1,5 @@
 CC=g++
-CF=-Wall
+CF=-O3
 INCLUDES=-L/usr/lib/x86_64-linux-gnu/
 
 SRCS=$(shell find . -name '*.cpp')

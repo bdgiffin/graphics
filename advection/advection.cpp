@@ -73,12 +73,14 @@ public :
 class Grid {
 private :
   int Nx, Ny, Px, Py;
+  Mesh* mesh;
   Pixel* pixels;
   float time;
 
 public :
 
   void initialize(CImg<float>& image) {
+    mesh = new Mesh(image);
     time = 0.0;
     std::cout << image.spectrum() << std::endl;
     Nx = image.width();
@@ -91,12 +93,11 @@ public :
     for (int j = 0; j < Ny; j++) {
       float y = h * (j + 0.5) - 1.0;
       for (int i = 0; i < Nx; i++) {
+	float c = mesh->He[Nx*j+i];
 	float x = w * (i + 0.5) - 1.0;
 	pixels[i+Nx*j].setCoordinate(x, y);
 	pixels[i+Nx*j].setDimension(w, h);
-	pixels[i+Nx*j].setColor(image(i,j,0)/256.0,
-                                image(i,j,0)/256.0,
-                                image(i,j,0)/256.0);
+	pixels[i+Nx*j].setColor(c,c,c);
       }
     }
   } // initialize
@@ -110,51 +111,8 @@ public :
   }
 
   void update(float dt) {
-    // compute updating coefficients
-    float w = 2.0 / Nx;
-    float h = 2.0 / Ny;
-    float k = 0.0003; // diffusivity
-    float fx = k * dt / (w*w);
-    float fy = k * dt / (h*h);
-
-    // compute change in concentration values (du)
-    float du[Nx][Ny];
-    for (int j = 0; j < Ny; j++) {
-      for (int i = 0; i < Nx; i++) {
-	du[i][j] = -2.0 * (fx + fy) * pixels[i+Nx*j].value();
-      }
-    }
-
-    for (int j = 0; j < Ny; j++) {
-      for (int i = 1; i < Nx; i++) {
-	du[i][j] += fx * pixels[i-1+Nx*j].value();
-      }
-    }
-
-    for (int j = 0; j < Ny; j++) {
-      for (int i = 0; i < (Nx-1); i++) {
-	du[i][j] += fx * pixels[i+1+Nx*j].value();
-      }
-    }
-
-    for (int j = 1; j < Ny; j++) {
-      for (int i = 0; i < Nx; i++) {
-	du[i][j] += fy * pixels[i+Nx*(j-1)].value();
-      }
-    }
-
-    for (int j = 0; j < (Ny-1); j++) {
-      for (int i = 0; i < Nx; i++) {
-	du[i][j] += fy * pixels[i+Nx*(j+1)].value();
-      }
-    }
-
-    // update concentrations
-    for (int j = 0; j < Ny; j++) {
-      for (int i = 0; i < Nx; i++) {
-	pixels[i+Nx*j].addValue(du[i][j]);
-      }
-    }
+    // update the solution
+    mesh->UpdateFields(dt);
 
     // update time
     time += dt;
@@ -188,7 +146,7 @@ public :
       float h = 2.0 / Ny;
       int i = std::min(std::max(int(floor(((2.0 / Px) * x) / w)),0),Nx-1);
       int j = std::min(std::max(int(floor((2.0 - (2.0 / Py) * y) / h)),0),Ny-1);
-      pixels[i+Nx*j].setColor(1.0,1.0,1.0);
+      mesh->He[Nx*j+i] = 1.0;
       glutMotionFunc(motion);
       glutPostRedisplay(); // refresh the display
     }
@@ -199,7 +157,7 @@ public :
     float h = 2.0 / Ny;
     int i = std::min(std::max(int(floor(((2.0 / Px) * x) / w)),0),Nx-1);
     int j = std::min(std::max(int(floor((2.0 - (2.0 / Py) * y) / h)),0),Ny-1);
-    pixels[i+Nx*j].setColor(1.0,1.0,1.0);
+    mesh->He[Nx*j+i] = 1.0;
     glutPostRedisplay(); // refresh the display
   }
 
@@ -207,10 +165,12 @@ public :
     // clear the current bit buffers, restoring them to their preset values
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // draw quadrilaterals
+    // update pixel colors, and draw quadrilaterals
     glBegin(GL_QUADS);
     for (int j = 0; j < Ny; j++) {
       for (int i = 0; i < Nx; i++) {
+	float c = mesh->He[Nx*j+i];
+	pixels[i+Nx*j].setColor(c,c,c);
 	pixels[i+Nx*j].render();
       }
     }
@@ -284,7 +244,7 @@ void reshape(int w, int h) {
 }
 
 int main(int argc, char** argv) {
-  CImg<float> image("elevation.png");
+  CImg<float> image("initial_conditions.png");
   g.initialize(image); // initialize the grid
 
   // initialize glut

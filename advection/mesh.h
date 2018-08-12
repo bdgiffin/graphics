@@ -6,7 +6,13 @@
 #include <cmath>    // sqrt
 #include <cstring>  // memset
 
+// include CImg for reading image files
+#include "CImg.h"
+using namespace cimg_library;
+
 class Mesh {
+public:
+
   // Discretization parameters
   int Nx, Ny; // Number of nodes in the x- and y-directions
   int Ex, Ey; // Number of elements in the x- and y-directions
@@ -34,9 +40,9 @@ class Mesh {
     Ny = Ey + 1;
     dx = width;
     dt = 1.0; // default initialization
-    Vxn = new float[Nx*Ny]();
-    Vyn = new float[Nx*Ny]();
-    He  = new float[Ex*Ey]();
+    Vxn = new float[Nx*Ny](); // zero initialization
+    Vyn = new float[Nx*Ny](); // zero initialization
+    He  = new float[Ex*Ey](); // zero initialization
     Re  = new float[4*Ex*Ey];
     Un  = new float[Nx*Ny];
     Ue  = new float[Ex*Ey];
@@ -44,12 +50,39 @@ class Mesh {
     dUn = new float[Nx*Ny];
   } // Mesh
 
-  void UpdateFields(void) {
+  Mesh(CImg<float>& image) {
+    Ex = image.width();
+    Ey = image.height();
+    Nx = Ex + 1;
+    Ny = Ey + 1;
+    dx = 1.0; // default initialization
+    dt = 1.0; // default initialization
+    Vxn = new float[Nx*Ny](); // zero initialization
+    Vyn = new float[Nx*Ny](); // zero initialization
+    He  = new float[Ex*Ey];
+    for (int j = 0; j < Ey; j++) {
+      for (int i = 0; i < Ex; i++) {
+	He[Ex*j+i] = image(i,j,0)/256.0; // grid height initialization
+      }
+    }
+    Re  = new float[4*Ex*Ey];
+    Un  = new float[Nx*Ny];
+    Ue  = new float[Ex*Ey];
+    Fn  = new float[Nx*Ny];
+    dUn = new float[Nx*Ny];
+  } // Mesh
+
+  void UpdateFields(float new_dt) {
+    // Update the time step
+    dt = new_dt;
+
+    // Form the integral operator
     UpdateIntegralOperator();
 
     // Update velocity field
     UpdateNodalField(Vxn);
     UpdateNodalField(Vyn);
+    UpdateMomentum();
 
     // Update pressure head field
     UpdateElementField(He);
@@ -97,6 +130,16 @@ class Mesh {
   } // UpdateElementField
 
   void EnforceNodalBCs(void) {
+    // Enforce tangential velocity BCs
+    float v = 5.0;
+    for (int j = 0; j < Ny; j++) {
+      Vyn[Nx*j]        = -v;
+      Vyn[Nx*j+(Nx-1)] = +v;
+    }
+    for (int i = 0; i < Nx; i++) {
+      Vxn[i]           = +v;
+      Vxn[Nx*(Ny-1)+i] = -v;
+    }
     // Enforce zero normal velocity BCs
     for (int j = 0; j < Ny; j++) {
       Vxn[Nx*j]        = 0.0;
@@ -107,6 +150,107 @@ class Mesh {
       Vyn[Nx*(Ny-1)+i] = 0.0;
     }
   } // EnforceNodalBCs
+
+  void UpdateMomentum(void) {
+    // Update momentum equation
+    float v = 0.01; // kinematic viscosity
+    float flux = v * dt / (dx*dx);
+    float force = - dt / dx;
+
+    // Compute x-momentum change
+    for (int j = 0; j < Ny; j++) {
+      for (int i = 0; i < Nx; i++) {
+	dUn[Nx*j+i] = - 4.0 * Vxn[Nx*j+i];
+      }
+    }
+    for (int j = 0; j < Ny; j++) {
+      for (int i = 1; i < Nx; i++) {
+	dUn[Nx*j+i] += Vxn[Nx*j+i-1];
+      }
+    }
+    for (int j = 0; j < Ny; j++) {
+      for (int i = 0; i < (Nx-1); i++) {
+	dUn[Nx*j+i] += Vxn[Nx*j+i+1];
+      }
+    }
+    for (int j = 1; j < Ny; j++) {
+      for (int i = 0; i < Nx; i++) {
+	dUn[Nx*j+i] += Vxn[Nx*(j-1)+i];
+      }
+    }
+    for (int j = 0; j < (Ny-1); j++) {
+      for (int i = 0; i < Nx; i++) {
+	dUn[Nx*j+i] += Vxn[Nx*(j+1)+i];
+      }
+    }
+    for (int i = 0; i < Nx*Ny; i++) {
+      Vxn[i] += flux * dUn[i];
+    }
+    // Add x-forces due to pressure head gradient
+    for (int j = 1; j < (Ny-1); j++) {
+      for (int i = 1; i < (Nx-1); i++) {
+	Vxn[Nx*j+i] += 0.5 * force * (He[Nx*j+i]    -He[Nx*j+i-1]
+                                     +He[Nx*(j-1)+i]-He[Nx*(j-1)+i-1]);
+      }
+    }
+    for (int j = 0; j < 1; j++) {
+      for (int i = 1; i < (Nx-1); i++) {
+	Vxn[Nx*j+i] += force * (He[Nx*j+i]-He[Nx*j+i-1]);
+      }
+    }
+    for (int j = (Ny-1); j < Ny; j++) {
+      for (int i = 1; i < (Nx-1); i++) {
+	Vxn[Nx*j+i] += force * (He[Nx*(j-1)+i]-He[Nx*(j-1)+i-1]);
+      }
+    }
+    
+    // Compute y-momentum change
+    for (int j = 0; j < Ny; j++) {
+      for (int i = 0; i < Nx; i++) {
+	dUn[Nx*j+i] = - 4.0 * Vyn[Nx*j+i];
+      }
+    }
+    for (int j = 0; j < Ny; j++) {
+      for (int i = 1; i < Nx; i++) {
+	dUn[Nx*j+i] += Vyn[Nx*j+i-1];
+      }
+    }
+    for (int j = 0; j < Ny; j++) {
+      for (int i = 0; i < (Nx-1); i++) {
+	dUn[Nx*j+i] += Vyn[Nx*j+i+1];
+      }
+    }
+    for (int j = 1; j < Ny; j++) {
+      for (int i = 0; i < Nx; i++) {
+	dUn[Nx*j+i] += Vyn[Nx*(j-1)+i];
+      }
+    }
+    for (int j = 0; j < (Ny-1); j++) {
+      for (int i = 0; i < Nx; i++) {
+	dUn[Nx*j+i] += Vyn[Nx*(j+1)+i];
+      }
+    }
+    for (int i = 0; i < Nx*Ny; i++) {
+      Vyn[i] += flux * dUn[i];
+    }
+    // Add y-forces due to pressure head gradient
+    for (int j = 1; j < (Ny-1); j++) {
+      for (int i = 1; i < (Nx-1); i++) {
+	Vyn[Nx*j+i] += 0.5 * force * (He[Nx*j+i]  -He[Nx*(j-1)+i]
+                                     +He[Nx*j+i-1]-He[Nx*(j-1)+i-1]);
+      }
+    }
+    for (int j = 1; j < (Ny-1); j++) {
+      for (int i = 0; i < 1; i++) {
+	Vyn[Nx*j+i] += force * (He[Nx*j+i]-He[Nx*(j-1)+i]);
+      }
+    }
+    for (int j = 1; j < (Ny-1); j++) {
+      for (int i = (Nx-1); i < Nx; i++) {
+	Vyn[Nx*j+i] += force * (He[Nx*j+i-1]-He[Nx*(j-1)+i-1]);
+      }
+    }
+  } // UpdateMomentum
 
   void Interpolate(float* Xn, float* Xe) {
                 // Xn[Nx*Ny], Xe[Ex*Ey]
@@ -240,7 +384,7 @@ class Mesh {
     dUn[Nx*(Ny-1)]        = w * Fn[Nx*(Ny-1)];
 
     // edges
-    float w = 1.0/(8.0*dx*dx);
+    w = 1.0/(8.0*dx*dx);
     for (int i = 1; i < (Nx-1); i++) {
       dUn[i]           = w * Fn[i];
       dUn[Nx*(Ny-1)+i] = w * Fn[Nx*(Ny-1)+i];
@@ -251,7 +395,7 @@ class Mesh {
     }
 
     // middle
-    float w = 1.0/(16.0*dx*dx);
+    w = 1.0/(16.0*dx*dx);
     for (int j = 1; j < (Ny-1); j++) {
       for (int i = 1; i < (Nx-1); i++) {
 	dUn[Nx*j+i] = w * Fn[Nx*j+i];
